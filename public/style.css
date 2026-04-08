@@ -388,3 +388,146 @@ footer {
 .hidden {
   display: none;
 }
+
+/* Health Status Bar */
+.status-bar {
+  padding: 0.75rem 1rem;
+  margin: 1rem auto;
+  max-width: 1200px;
+  border-radius: 4px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.status-success {
+  background-color: #e6f4ea;
+  color: #137333;
+  border: 1px solid var(--green);
+}
+
+.status-error {
+  background-color: #fce8e6;
+  color: #c5221f;
+  border: 1px solid var(--red);
+}
+
+/* Time Slots Preview Table */
+.timeslots-preview {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.timeslots-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.timeslots-table th,
+.timeslots-table td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--light-border);
+}
+
+.timeslots-table th {
+  background-color: var(--gray);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+
+.timeslots-table tr.break-row {
+  background-color: #fef7e0;
+}
+
+.text-muted {
+  color: var(--dark-gray);
+  font-style: italic;
+}
+
+/* Section Tags/Chips */
+.section-tags {
+  margin: 1rem 0;
+  padding: 1rem;
+  background-color: var(--gray);
+  border-radius: 8px;
+  border: 1px solid var(--light-border);
+}
+
+.section-tags h4 {
+  color: var(--dark-gray);
+  font-size: 0.95rem;
+  margin-bottom: 0.75rem;
+}
+
+.tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tag-chip {
+  display: inline-block;
+  padding: 0.4rem 0.8rem;
+  background-color: var(--blue);
+  color: var(--white);
+  border-radius: 16px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+/* Room Utilization Table */
+.utilization-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+.utilization-table th,
+.utilization-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--light-border);
+}
+
+.utilization-table th {
+  background-color: var(--gray);
+  font-weight: 600;
+}
+
+.utilization-table tr.utilization-high {
+  background-color: #e6f4ea;
+}
+
+.utilization-table tr.utilization-medium {
+  background-color: #fef7e0;
+}
+
+.utilization-table tr.utilization-low {
+  background-color: #fce8e6;
+}
+
+.occupancy-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.occupancy-badge.high {
+  background-color: var(--green);
+  color: var(--white);
+}
+
+.occupancy-badge.medium {
+  background-color: var(--yellow);
+  color: #202124;
+}
+
+.occupancy-badge.low {
+  background-color: var(--red);
+  color: var(--white);
+}

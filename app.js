@@ -10,6 +10,7 @@ const { generateExamSchedule } = require('./src/exam');
 const { exportExamSchedule } = require('./src/exportExam');
 const { extractFacultyTimetables } = require('./src/faculty');
 const { exportFacultyTimetables } = require('./src/exportFaculty');
+const { generateTimeSlots } = require('./src/timeSlotGenerator');
 
 const app = express();
 const PORT = 3000;
@@ -92,6 +93,9 @@ app.get('/api/validate', async (req, res) => {
     const timetable = generateTimetable(courses, rooms, timeSlots);
     const validation = validateTimetable(timetable, courses);
 
+    // Calculate room utilization
+    const roomUtilization = calculateRoomUtilization(timetable, rooms);
+
     res.json({
       timetable,
       validation,
@@ -100,12 +104,66 @@ app.get('/api/validate', async (req, res) => {
         totalConflicts: validation.conflicts.length,
         totalMissingHours: validation.missingHours.length,
         isValid: validation.valid
-      }
+      },
+      roomUtilization
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
+
+/**
+ * Calculate room utilization from timetable entries
+ * @param {Array} timetable - Timetable entries
+ * @param {Array} rooms - Array of rooms
+ * @returns {Array} Room utilization data
+ */
+function calculateRoomUtilization(timetable, rooms) {
+  const roomStats = new Map();
+
+  // Initialize stats for all rooms
+  for (const room of rooms) {
+    roomStats.set(room.room_id, {
+      room_id: room.room_id,
+      room_name: room.name,
+      capacity: room.capacity,
+      totalSessions: 0,
+      totalStudents: 0
+    });
+  }
+
+  // Count sessions and students per room
+  for (const entry of timetable) {
+    const stats = roomStats.get(entry.room_id);
+    if (stats) {
+      stats.totalSessions++;
+      // Estimate students based on section strength (approximate)
+      stats.totalStudents += entry.room_capacity || 0;
+    }
+  }
+
+  // Calculate utilization percentage
+  const utilization = [];
+  for (const [roomId, stats] of roomStats) {
+    // Utilization = (total students / (capacity * sessions)) * 100
+    // But since we're tracking actual usage, use: (sessions using room / max possible sessions) * 100
+    // For simplicity: avg occupancy % = (avg students per session / capacity) * 100
+    const avgOccupancy = stats.totalSessions > 0
+      ? Math.round((stats.totalStudents / (stats.totalSessions * stats.capacity)) * 100)
+      : 0;
+
+    utilization.push({
+      room_id: stats.room_id,
+      room_name: stats.room_name,
+      capacity: stats.capacity,
+      totalSessions: stats.totalSessions,
+      avgOccupancy: Math.min(avgOccupancy, 100) // Cap at 100%
+    });
+  }
+
+  // Sort by total sessions (most used first)
+  return utilization.sort((a, b) => b.totalSessions - a.totalSessions);
+}
 
 // POST /api/generate/timetable - Generate, validate, and export timetable
 app.post('/api/generate/timetable', async (req, res) => {
@@ -117,6 +175,10 @@ app.post('/api/generate/timetable', async (req, res) => {
       loadAllCourses()
     ]);
 
+    // Get unique sections and log
+    const sections = [...new Set(courses.map(c => c.section))].sort();
+    console.log(`Loaded ${sections.length} sections: [${sections.join(', ')}]`);
+
     const timetable = generateTimetable(courses, rooms, timeSlots);
     const validation = validateTimetable(timetable, courses);
 
@@ -127,6 +189,8 @@ app.post('/api/generate/timetable', async (req, res) => {
       success: true,
       conflicts: validation.conflicts,
       missingHours: validation.missingHours,
+      sectionCount: sections.length,
+      sections: sections,
       file: outputPath
     });
   } catch (error) {
@@ -331,6 +395,62 @@ app.get('/api/download/:filename', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// GET /api/health - Health check endpoint
+app.get('/api/health', async (req, res) => {
+  try {
+    const [dataFiles, outputFiles] = await Promise.all([
+      fs.readdir(DATA_DIR),
+      fs.readdir(OUTPUTS_DIR)
+    ]);
+
+    res.json({
+      status: 'ok',
+      dataFiles: dataFiles.length,
+      outputFiles: outputFiles.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      error: error.message
+    });
+  }
+});
+
+// POST /api/timeslots/preview - Generate time slots preview from config
+app.post('/api/timeslots/preview', (req, res) => {
+  try {
+    const config = req.body;
+    const result = generateTimeSlots(config);
+    res.json({ slots: result.slots, breakSlots: result.breakSlots });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/timeslots/save - Save time slot config
+app.post('/api/timeslots/save', async (req, res) => {
+  try {
+    const config = req.body;
+    const configPath = path.join(DATA_DIR, 'time_slots.json');
+
+    await fs.writeJson(configPath, config, { spaces: 2 });
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Global error handler middleware
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({
+    success: false,
+    error: err.message || 'Internal server error'
+  });
 });
 
 app.listen(PORT, () => {

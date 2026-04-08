@@ -76,7 +76,7 @@ function assignElectiveSlots(electiveGroups, slotAllocator, roomSelector, timeSl
       const { day, slotId } = foundSlot;
 
       // Find a room for this section
-      const room = roomSelector.findRoom('L', course.section_strength, day, slotId);
+      const room = roomSelector.findRoomByStrength('L', course.section_strength, day, slotId, course.room_requirements || [], course.course_code);
 
       if (!room) {
         console.warn(`WARNING: No room available for ${course.course_code} (${course.section}) at ${day} slot ${slotId}`);
@@ -103,7 +103,9 @@ function assignElectiveSlots(electiveGroups, slotAllocator, roomSelector, timeSl
         slot_label: slotLabel,
         room_id: room.room_id,
         room_name: room.name,
-        type: 'L'
+        room_capacity: room.capacity,
+        type: 'L',
+        room_requirements: course.room_requirements || []
       });
     }
   }

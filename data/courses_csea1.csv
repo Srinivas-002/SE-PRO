@@ -1,5 +1,5 @@
-course_code,name,faculty_id,L,T,P,S,C,section,is_elective,section_strength
-CS101,Data Structures,F01,3,1,2,0,5,CSEA-I,false,60
-CS102,Discrete Math,F04,3,1,0,0,4,CSEA-I,false,60
-CS103,Digital Logic,F03,3,0,2,0,4,CSEA-I,false,60
-CS104,Web Dev Elective,F02,2,0,2,0,3,CSEA-I,true,30
+course_code,name,faculty_id,L,T,P,S,C,section,is_elective,section_strength,room_requirements
+CS101,Data Structures,F01,3,1,2,0,5,CSEA-I,false,60,Computers
+CS102,Discrete Math,F04,3,1,0,0,4,CSEA-I,false,60,
+CS103,Digital Logic,F03,3,0,2,0,4,CSEA-I,false,60,Hardware
+CS104,Web Dev Elective,F02,2,0,2,0,3,CSEA-I,true,30,Computers

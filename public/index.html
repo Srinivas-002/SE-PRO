@@ -12,6 +12,9 @@
     <p>Academic Scheduling System</p>
   </header>
 
+  <!-- Health Status Bar -->
+  <div id="health-status" class="status-bar" style="display: none;"></div>
+
   <main>
     <!-- Section 1: Upload Data -->
     <section id="upload-section" class="section">
@@ -40,6 +43,52 @@
         <h3>Uploaded Files</h3>
         <div id="file-list" class="file-list">
           <!-- Files will be listed here -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 1b: Time Slot Settings -->
+    <section id="timeslot-section" class="section">
+      <h2>Time Slot Settings</h2>
+      <div class="generate-cards">
+        <!-- Time Slot Settings Card -->
+        <div class="card">
+          <h3>Configure Time Slots</h3>
+          <p>Set start time, end time, and period durations</p>
+          <div class="form-group">
+            <label for="ts-start-time">Start Time:</label>
+            <input type="time" id="ts-start-time" value="09:00">
+          </div>
+          <div class="form-group">
+            <label for="ts-end-time">End Time:</label>
+            <input type="time" id="ts-end-time" value="18:00">
+          </div>
+          <div class="form-group">
+            <label for="ts-period-duration">Period Duration (minutes):</label>
+            <input type="number" id="ts-period-duration" value="55" min="30" max="120">
+          </div>
+          <div class="form-group">
+            <label for="ts-break-after">Lunch After Period #:</label>
+            <input type="number" id="ts-break-after" value="4" min="1" max="10">
+          </div>
+          <div class="form-group">
+            <label for="ts-lunch-duration">Lunch Duration (minutes):</label>
+            <input type="number" id="ts-lunch-duration" value="60" min="30" max="120">
+          </div>
+          <div class="form-group">
+            <label for="ts-short-break">Short Break (minutes):</label>
+            <input type="number" id="ts-short-break" value="5" min="0" max="30">
+          </div>
+          <button id="preview-timeslots-btn" class="btn btn-secondary">Preview Slots</button>
+          <button id="save-timeslots-btn" class="btn btn-primary">Save Config</button>
+        </div>
+
+        <!-- Preview Card -->
+        <div class="card">
+          <h3>Generated Slots Preview</h3>
+          <div id="timeslots-preview" class="timeslots-preview">
+            <p class="text-muted">Click "Preview Slots" to see generated time slots</p>
+          </div>
         </div>
       </div>
     </section>

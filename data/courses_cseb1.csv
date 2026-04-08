@@ -1,5 +1,5 @@
-course_code,name,faculty_id,L,T,P,S,C,section,is_elective,section_strength
-CS101,Data Structures,F01,3,1,2,0,5,CSEB-I,false,60
-CS102,Discrete Math,F04,3,1,0,0,4,CSEB-I,false,60
-CS105,Networks,F05,3,1,2,0,5,CSEB-I,false,60
-CS104,Web Dev Elective,F02,2,0,2,0,3,CSEB-I,true,30
+course_code,name,faculty_id,L,T,P,S,C,section,is_elective,section_strength,room_requirements
+CS101,Data Structures,F01,3,1,2,0,5,CSEB-I,false,60,Computers
+CS102,Discrete Math,F04,3,1,0,0,4,CSEB-I,false,60,
+CS105,Networks,F05,3,1,2,0,5,CSEB-I,false,60,Computers
+CS104,Web Dev Elective,F02,2,0,2,0,3,CSEB-I,true,30,Computers

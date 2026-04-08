@@ -62,7 +62,99 @@ async function exportTimetable(entries, timeSlots, outputPath) {
   // Days in order
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
-  // Create a sheet for each section
+  // Create Summary sheet FIRST (at the start)
+  const summarySheet = workbook.addWorksheet('Summary');
+  summarySheet.getRow(1).values = ['Section', 'Total Courses', 'Total Weekly Hours', 'Shared Faculty Courses'];
+  summarySheet.getRow(1).font = { bold: true };
+  summarySheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
+  summarySheet.getRow(1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFE0E0E0' }
+  };
+
+  // Calculate summary data per section
+  const sectionSummary = new Map();
+  const facultyCoursesMap = new Map(); // faculty_id -> Set of course_codes
+
+  for (const section of sections) {
+    const sectionEntries = entries.filter(e => e.section === section);
+    const uniqueCourses = new Set(sectionEntries.map(e => e.course_code));
+
+    // Count weekly hours (L+T+P per course, but we count entries)
+    // Each entry represents 1 hour (L/T) or 2 hours (P counted as 1 entry but 2 slots)
+    let totalHours = 0;
+    for (const entry of sectionEntries) {
+      if (entry.type === 'P') {
+        totalHours += 2; // P is 2-hour block
+      } else {
+        totalHours += 1;
+      }
+    }
+
+    // Track faculty and their courses for shared faculty detection
+    for (const entry of sectionEntries) {
+      if (!facultyCoursesMap.has(entry.faculty_id)) {
+        facultyCoursesMap.set(entry.faculty_id, new Set());
+      }
+      facultyCoursesMap.get(entry.faculty_id).add(`${entry.course_code}|${entry.section}`);
+    }
+
+    sectionSummary.set(section, {
+      totalCourses: uniqueCourses.size,
+      totalHours
+    });
+  }
+
+  // Find sections with shared faculty (same faculty teaching in multiple sections)
+  const sharedFacultyCourses = new Set();
+  for (const [facultyId, courses] of facultyCoursesMap) {
+    const sectionsSet = new Set();
+    for (const courseSection of courses) {
+      const [, section] = courseSection.split('|');
+      sectionsSet.add(section);
+    }
+    if (sectionsSet.size > 1) {
+      // This faculty teaches in multiple sections
+      for (const courseSection of courses) {
+        sharedFacultyCourses.add(courseSection);
+      }
+    }
+  }
+
+  // Fill summary rows
+  let summaryRowIdx = 2;
+  for (const section of sections) {
+    const summary = sectionSummary.get(section);
+    const row = summarySheet.getRow(summaryRowIdx);
+    const hasSharedFaculty = [...facultyCoursesMap.entries()].some(([fid, courses]) => {
+      const sectionsForThisFaculty = new Set([...courses].map(c => c.split('|')[1]));
+      return sectionsForThisFaculty.has(section) && sectionsForThisFaculty.size > 1;
+    });
+
+    row.values = [
+      section,
+      summary.totalCourses,
+      summary.totalHours,
+      hasSharedFaculty ? 'Yes' : 'No'
+    ];
+    row.alignment = { vertical: 'middle', horizontal: 'center' };
+    row.border = {
+      top: { style: 'thin' },
+      left: { style: 'thin' },
+      bottom: { style: 'thin' },
+      right: { style: 'thin' }
+    };
+    summaryRowIdx++;
+  }
+
+  // Set column widths for summary
+  summarySheet.getColumn(1).width = 15;
+  summarySheet.getColumn(2).width = 15;
+  summarySheet.getColumn(3).width = 20;
+  summarySheet.getColumn(4).width = 20;
+
+  // Create a sheet for each section (after Summary)
   for (const section of sections) {
     const sheet = workbook.addWorksheet(section);
 
@@ -174,7 +266,7 @@ async function exportTimetable(entries, timeSlots, outputPath) {
   const legendSheet = workbook.addWorksheet('Legend');
 
   // Header
-  legendSheet.getRow(1).values = ['Course Code', 'Course Name', 'Faculty', 'Sessions per week', 'Color'];
+  legendSheet.getRow(1).values = ['Course Code', 'Course Name', 'Faculty', 'Sessions per week', 'Room Requirements', 'Color'];
   legendSheet.getRow(1).font = { bold: true };
   legendSheet.getRow(1).alignment = { vertical: 'middle', horizontal: 'center' };
   legendSheet.getRow(1).fill = {
@@ -183,7 +275,7 @@ async function exportTimetable(entries, timeSlots, outputPath) {
     fgColor: { argb: 'FFE0E0E0' }
   };
 
-  // Get unique courses
+  // Get unique courses with room requirements
   const courseMap = new Map();
   for (const entry of entries) {
     const key = entry.course_code;
@@ -193,6 +285,7 @@ async function exportTimetable(entries, timeSlots, outputPath) {
         course_name: entry.course_name,
         faculty_id: entry.faculty_id,
         sessions: 0,
+        room_requirements: entry.room_requirements || [],
         color: getColorForCourse(entry.course_code)
       });
     }
@@ -203,10 +296,13 @@ async function exportTimetable(entries, timeSlots, outputPath) {
   let rowIdx = 2;
   for (const course of courseMap.values()) {
     const row = legendSheet.getRow(rowIdx);
-    row.values = [course.course_code, course.course_name, course.faculty_id, course.sessions, ''];
+    const roomReqStr = course.room_requirements.length > 0
+      ? course.room_requirements.join(', ')
+      : '-';
+    row.values = [course.course_code, course.course_name, course.faculty_id, course.sessions, roomReqStr, ''];
 
     // Add color indicator
-    const colorCell = legendSheet.getCell(rowIdx, 5);
+    const colorCell = legendSheet.getCell(rowIdx, 6);
     colorCell.fill = {
       type: 'pattern',
       pattern: 'solid',
@@ -221,7 +317,8 @@ async function exportTimetable(entries, timeSlots, outputPath) {
   legendSheet.getColumn(2).width = 30;
   legendSheet.getColumn(3).width = 15;
   legendSheet.getColumn(4).width = 20;
-  legendSheet.getColumn(5).width = 10;
+  legendSheet.getColumn(5).width = 20;
+  legendSheet.getColumn(6).width = 10;
 
   // Ensure output directory exists
   await fs.ensureDir(path.dirname(outputPath));

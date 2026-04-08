@@ -48,21 +48,198 @@ class RoomSelector {
   }
 
   /**
+   * Check if a room has all required equipment
+   * @param {Array<string>} roomEquipment - Room's equipment list
+   * @param {Array<string>} requirements - Required equipment
+   * @returns {boolean}
+   */
+  _hasRequiredEquipment(roomEquipment, requirements) {
+    if (!requirements || requirements.length === 0) {
+      return true; // No requirements means any room is fine
+    }
+    return requirements.every(req => roomEquipment.includes(req));
+  }
+
+  /**
+   * Get capacity tier for a given section strength
+   * Capacity tiers with ±10 tolerance:
+   * - Small:  30-60   → strength <= 48
+   * - Medium: 86-106  → strength 49-96
+   * - Large:  120-140 → strength 97-130
+   * - Hall:   230-250 → strength 131-240
+   * @param {number} sectionStrength
+   * @returns {{ tier: string, minCap: number, maxCap: number }}
+   */
+  _getCapacityTier(sectionStrength) {
+    if (sectionStrength <= 48) {
+      return { tier: 'small', minCap: 30, maxCap: 60 };
+    } else if (sectionStrength <= 96) {
+      return { tier: 'medium', minCap: 86, maxCap: 106 };
+    } else if (sectionStrength <= 130) {
+      return { tier: 'large', minCap: 120, maxCap: 140 };
+    } else {
+      return { tier: 'hall', minCap: 230, maxCap: 250 };
+    }
+  }
+
+  /**
+   * Find room using tiered capacity logic based on actual section strength
+   * @param {string} sessionType - 'L', 'T', or 'P'
+   * @param {number} sectionStrength - Number of students
+   * @param {string} day
+   * @param {number} slotId
+   * @param {Array<string>} requirements - Required equipment
+   * @param {string} courseCode - Course code for logging
+   * @returns {{ room_id, name, capacity, type } | null}
+   */
+  findRoomByStrength(sessionType, sectionStrength, day, slotId, requirements = [], courseCode = '') {
+    const key = this._makeKey(day, slotId);
+    const bookedRooms = this._getBookedRooms(key);
+    const tier = this._getCapacityTier(sectionStrength);
+
+    // For lab sessions (P type), use lab-specific logic
+    if (sessionType === 'P') {
+      // Find labs within appropriate capacity tier
+      const matchingLabs = this.rooms
+        .filter(room =>
+          room.type === 'lab' &&
+          !bookedRooms.has(room.room_id) &&
+          room.capacity >= sectionStrength &&
+          room.capacity <= tier.maxCap + 10 && // ±10 tolerance
+          this._hasRequiredEquipment(room.equipment, requirements)
+        )
+        .sort((a, b) => a.capacity - b.capacity);
+
+      if (matchingLabs.length > 0) {
+        return matchingLabs[0];
+      }
+
+      // Fallback: any lab that fits (without equipment match)
+      const fallbackLabs = this.rooms
+        .filter(room =>
+          room.type === 'lab' &&
+          !bookedRooms.has(room.room_id) &&
+          room.capacity >= sectionStrength
+        )
+        .sort((a, b) => a.capacity - b.capacity);
+
+      if (fallbackLabs.length > 0) {
+        if (courseCode && requirements.length > 0) {
+          console.warn(`Room without required equipment assigned for ${courseCode}`);
+        }
+        return fallbackLabs[0];
+      }
+
+      return null;
+    }
+
+    // For L/T sessions, use tiered classroom selection
+    if (sessionType === 'L' || sessionType === 'T') {
+      // Step 1: Find rooms in the appropriate tier with equipment match
+      const tierRooms = this.rooms
+        .filter(room =>
+          (room.type === 'classroom' || room.type === 'hall') &&
+          !bookedRooms.has(room.room_id) &&
+          room.capacity >= sectionStrength &&
+          room.capacity <= tier.maxCap + 10 && // ±10 tolerance
+          this._hasRequiredEquipment(room.equipment, requirements)
+        )
+        .sort((a, b) => a.capacity - b.capacity);
+
+      if (tierRooms.length > 0) {
+        return tierRooms[0];
+      }
+
+      // Step 2: Fallback - classroom without equipment match in tier
+      const fallbackClassrooms = this.rooms
+        .filter(room =>
+          room.type === 'classroom' &&
+          !bookedRooms.has(room.room_id) &&
+          room.capacity >= sectionStrength &&
+          room.capacity <= tier.maxCap + 10
+        )
+        .sort((a, b) => a.capacity - b.capacity);
+
+      if (fallbackClassrooms.length > 0) {
+        if (courseCode && requirements.length > 0) {
+          console.warn(`Room without required equipment assigned for ${courseCode}`);
+        }
+        return fallbackClassrooms[0];
+      }
+
+      // Step 3: Try larger tier (but still prefer smallest available)
+      const largerRooms = this.rooms
+        .filter(room =>
+          room.type === 'classroom' &&
+          !bookedRooms.has(room.room_id) &&
+          room.capacity >= sectionStrength
+        )
+        .sort((a, b) => a.capacity - b.capacity);
+
+      if (largerRooms.length > 0) {
+        if (courseCode && requirements.length > 0) {
+          console.warn(`Room without required equipment assigned for ${courseCode}`);
+        }
+        return largerRooms[0];
+      }
+
+      // Step 4: Hall as last resort
+      const halls = this.rooms
+        .filter(room =>
+          room.type === 'hall' &&
+          !bookedRooms.has(room.room_id) &&
+          room.capacity >= sectionStrength
+        )
+        .sort((a, b) => a.capacity - b.capacity);
+
+      if (halls.length > 0) {
+        if (courseCode && requirements.length > 0) {
+          console.warn(`Room without required equipment assigned for ${courseCode}`);
+        }
+        return halls[0];
+      }
+
+      return null;
+    }
+
+    return null;
+  }
+
+  /**
    * Find an appropriate room based on session type and constraints
    * @param {string} sessionType - 'L', 'T', or 'P'
    * @param {number} sectionStrength - Number of students
    * @param {string} day
    * @param {number} slotId
+   * @param {Array<string>} requirements - Required equipment (e.g., ['Computers', 'Whiteboard'])
+   * @param {string} courseCode - Course code for logging warnings
    * @returns {{ room_id, name, capacity, type } | null}
    */
-  findRoom(sessionType, sectionStrength, day, slotId) {
+  findRoom(sessionType, sectionStrength, day, slotId, requirements = [], courseCode = '') {
     const key = this._makeKey(day, slotId);
     const bookedRooms = this._getBookedRooms(key);
 
     if (sessionType === 'P') {
       // Practical sessions require a lab
+      // First, try to find a lab with required equipment
+      const matchingLabs = this.rooms
+        .filter(room =>
+          room.type === 'lab' &&
+          !bookedRooms.has(room.room_id) &&
+          this._hasRequiredEquipment(room.equipment, requirements)
+        )
+        .sort((a, b) => a.capacity - b.capacity);
+
+      if (matchingLabs.length > 0) {
+        return matchingLabs[0];
+      }
+
+      // Fallback: any lab (without required equipment)
       for (const room of this.rooms) {
         if (room.type === 'lab' && !bookedRooms.has(room.room_id)) {
+          if (courseCode && requirements.length > 0) {
+            console.warn(`Room without required equipment assigned for ${courseCode}`);
+          }
           return room;
         }
       }
@@ -70,12 +247,13 @@ class RoomSelector {
     }
 
     if (sessionType === 'L' || sessionType === 'T') {
-      // Lecture/Tutorial: prefer classroom with sufficient capacity
+      // Lecture/Tutorial: prefer classroom with sufficient capacity and required equipment
       const suitableClassrooms = this.rooms
         .filter(room =>
           room.type === 'classroom' &&
           room.capacity >= sectionStrength &&
-          !bookedRooms.has(room.room_id)
+          !bookedRooms.has(room.room_id) &&
+          this._hasRequiredEquipment(room.equipment, requirements)
         )
         .sort((a, b) => a.capacity - b.capacity); // Prefer smallest adequate room
 
@@ -83,8 +261,38 @@ class RoomSelector {
         return suitableClassrooms[0];
       }
 
+      // Fallback: classroom without required equipment
+      const fallbackClassrooms = this.rooms
+        .filter(room =>
+          room.type === 'classroom' &&
+          room.capacity >= sectionStrength &&
+          !bookedRooms.has(room.room_id)
+        )
+        .sort((a, b) => a.capacity - b.capacity);
+
+      if (fallbackClassrooms.length > 0) {
+        if (courseCode && requirements.length > 0) {
+          console.warn(`Room without required equipment assigned for ${courseCode}`);
+        }
+        return fallbackClassrooms[0];
+      }
+
       // Fallback to hall if no classroom available
       const halls = this.rooms
+        .filter(room =>
+          room.type === 'hall' &&
+          room.capacity >= sectionStrength &&
+          !bookedRooms.has(room.room_id) &&
+          this._hasRequiredEquipment(room.equipment, requirements)
+        )
+        .sort((a, b) => a.capacity - b.capacity);
+
+      if (halls.length > 0) {
+        return halls[0];
+      }
+
+      // Fallback: hall without required equipment
+      const fallbackHalls = this.rooms
         .filter(room =>
           room.type === 'hall' &&
           room.capacity >= sectionStrength &&
@@ -92,8 +300,11 @@ class RoomSelector {
         )
         .sort((a, b) => a.capacity - b.capacity);
 
-      if (halls.length > 0) {
-        return halls[0];
+      if (fallbackHalls.length > 0) {
+        if (courseCode && requirements.length > 0) {
+          console.warn(`Room without required equipment assigned for ${courseCode}`);
+        }
+        return fallbackHalls[0];
       }
 
       return null;

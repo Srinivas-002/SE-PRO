@@ -20,6 +20,9 @@ function generateTimetable(courses, rooms, timeSlots) {
 
   // Step 2: Group electives and assign slots
   const electiveGroups = groupElectives(electiveCourses);
+
+  // Create SINGLE global slotAllocator and roomSelector shared across ALL sections
+  // This ensures faculty conflicts and room conflicts are checked ACROSS all sections
   const slotAllocator = new SlotAllocator(timeSlots);
   const roomSelector = new RoomSelector(rooms);
 
@@ -33,142 +36,158 @@ function generateTimetable(courses, rooms, timeSlots) {
   // Assign elective slots (pre-assigns and books them)
   const electiveEntries = assignElectiveSlots(electiveGroups, slotAllocator, roomSelector, timeSlots);
 
-  // Step 3-4: slotAllocator and roomSelector already have elective bookings marked
-
-  // Step 5: Schedule non-elective courses
-  const nonElectiveEntries = [];
-  const MAX_RETRY_ATTEMPTS = 300;
-
+  // Step 3: Group non-elective courses by section
+  const coursesBySection = new Map();
   for (const course of nonElectiveCourses) {
-    const { course_code, name, faculty_id, section, L, T, P, section_strength, is_elective } = course;
-
-    // Validate faculty exists (warn if unknown)
-    const actualFacultyId = faculty_id || 'TBA';
-    if (!faculty_id) {
-      console.warn(`WARNING: Course ${course_code} has no faculty_id assigned, using "TBA"`);
+    if (!coursesBySection.has(course.section)) {
+      coursesBySection.set(course.section, []);
     }
-
-    // Schedule L lectures (1 hour each) with retry cap
-    let lAttempts = 0;
-    for (let i = 0; i < L && lAttempts < MAX_RETRY_ATTEMPTS; i++) {
-      lAttempts++;
-      const found = slotAllocator.findFreeSlot(actualFacultyId, section);
-      if (!found) {
-        console.warn(`WARNING: Could not find slot for ${course_code} L session ${i + 1}`);
-        continue;
-      }
-
-      const room = roomSelector.findRoom('L', section_strength, found.day, found.slot);
-      if (!room) {
-        console.warn(`WARNING: No room for ${course_code} L session ${i + 1}`);
-        continue;
-      }
-
-      slotAllocator.bookSlot(actualFacultyId, section, room.room_id, found.day, found.slot);
-      roomSelector.bookRoom(room.room_id, found.day, found.slot);
-
-      nonElectiveEntries.push({
-        course_code,
-        course_name: name,
-        faculty_id: actualFacultyId,
-        section,
-        day: found.day,
-        slot_id: found.slot,
-        slot_label: timeSlots.slots.find(s => s.id === found.slot)?.label || '',
-        room_id: room.room_id,
-        room_name: room.name,
-        type: 'L'
-      });
-    }
-
-    // Schedule T tutorials (1 hour each) with retry cap
-    let tAttempts = 0;
-    for (let i = 0; i < T && tAttempts < MAX_RETRY_ATTEMPTS; i++) {
-      tAttempts++;
-      const found = slotAllocator.findFreeSlot(actualFacultyId, section);
-      if (!found) {
-        console.warn(`WARNING: Could not find slot for ${course_code} T session ${i + 1}`);
-        continue;
-      }
-
-      const room = roomSelector.findRoom('T', section_strength, found.day, found.slot);
-      if (!room) {
-        console.warn(`WARNING: No room for ${course_code} T session ${i + 1}`);
-        continue;
-      }
-
-      slotAllocator.bookSlot(actualFacultyId, section, room.room_id, found.day, found.slot);
-      roomSelector.bookRoom(room.room_id, found.day, found.slot);
-
-      nonElectiveEntries.push({
-        course_code,
-        course_name: name,
-        faculty_id: actualFacultyId,
-        section,
-        day: found.day,
-        slot_id: found.slot,
-        slot_label: timeSlots.slots.find(s => s.id === found.slot)?.label || '',
-        room_id: room.room_id,
-        room_name: room.name,
-        type: 'T'
-      });
-    }
-
-    // Schedule P practicals (2-hour contiguous blocks) with retry cap
-    // Each P session needs 2 consecutive slots
-    let pAttempts = 0;
-    for (let i = 0; i < P && pAttempts < MAX_RETRY_ATTEMPTS; i++) {
-      pAttempts++;
-      const contiguous = slotAllocator.findContiguousSlots(actualFacultyId, section, '_LAB', 2);
-      if (!contiguous) {
-        console.warn(`WARNING: Could not find contiguous slots for ${course_code} P session ${i + 1}`);
-        continue;
-      }
-
-      // Find a lab room for the first slot (both slots use same room)
-      const firstSlot = contiguous[0];
-      let room = roomSelector.findRoom('P', section_strength, firstSlot.day, firstSlot.slot);
-
-      // Fallback: if no lab available, use classroom
-      if (!room) {
-        console.warn(`WARNING: No lab room for ${course_code} P session ${i + 1}, using classroom`);
-        room = roomSelector.findRoom('L', section_strength, firstSlot.day, firstSlot.slot);
-        if (!room) {
-          console.warn(`WARNING: No room available for ${course_code} P session ${i + 1}`);
-          continue;
-        }
-      }
-
-      // Book both slots with the same room
-      for (const cs of contiguous) {
-        slotAllocator.bookSlot(actualFacultyId, section, room.room_id, cs.day, cs.slot);
-        roomSelector.bookRoom(room.room_id, cs.day, cs.slot);
-      }
-
-      // Create entry for the practical session (spans both slots)
-      const slotLabels = contiguous.map(cs =>
-        timeSlots.slots.find(s => s.id === cs.slot)?.label || ''
-      ).join(' - ');
-
-      nonElectiveEntries.push({
-        course_code,
-        course_name: name,
-        faculty_id: actualFacultyId,
-        section,
-        day: firstSlot.day,
-        slot_id: contiguous.map(c => c.slot),
-        slot_label: slotLabels,
-        room_id: room.room_id,
-        room_name: room.name,
-        type: 'P'
-      });
-    }
+    coursesBySection.get(course.section).push(course);
   }
 
-  // Step 6: Merge elective and non-elective entries
-  const allEntries = [...electiveEntries, ...nonElectiveEntries];
+  // Step 4: Process each section independently through the shared SlotAllocator
+  const allNonElectiveEntries = [];
+  const MAX_RETRY_ATTEMPTS = 300;
 
-  // Step 7: Return all entries
+  for (const [section, sectionCourses] of coursesBySection) {
+    const sectionEntries = [];
+
+    for (const course of sectionCourses) {
+      const { course_code, name, faculty_id, section: courseSection, L, T, P, section_strength, is_elective } = course;
+
+      // Validate faculty exists (warn if unknown)
+      const actualFacultyId = faculty_id || 'TBA';
+      if (!faculty_id) {
+        console.warn(`WARNING: Course ${course_code} has no faculty_id assigned, using "TBA"`);
+      }
+
+      // Schedule L lectures (1 hour each) with retry cap
+      let lAttempts = 0;
+      for (let i = 0; i < L && lAttempts < MAX_RETRY_ATTEMPTS; i++) {
+        lAttempts++;
+        // Uses shared slotAllocator - checks faculty conflicts ACROSS all sections
+        const found = slotAllocator.findFreeSlot(actualFacultyId, courseSection);
+        if (!found) {
+          console.warn(`WARNING: Could not find slot for ${course_code} L session ${i + 1}`);
+          continue;
+        }
+
+        const room = roomSelector.findRoomByStrength('L', section_strength, found.day, found.slot, course.room_requirements || [], course_code);
+        if (!room) {
+          console.warn(`WARNING: No room for ${course_code} L session ${i + 1}`);
+          continue;
+        }
+
+        // Books to shared slotAllocator and roomSelector - prevents cross-section conflicts
+        slotAllocator.bookSlot(actualFacultyId, courseSection, room.room_id, found.day, found.slot);
+        roomSelector.bookRoom(room.room_id, found.day, found.slot);
+
+        sectionEntries.push({
+          course_code,
+          course_name: name,
+          faculty_id: actualFacultyId,
+          section: courseSection,
+          day: found.day,
+          slot_id: found.slot,
+          slot_label: timeSlots.slots.find(s => s.id === found.slot)?.label || '',
+          room_id: room.room_id,
+          room_name: room.name,
+          room_capacity: room.capacity,
+          type: 'L',
+          room_requirements: course.room_requirements || []
+        });
+      }
+
+      // Schedule T tutorials (1 hour each) with retry cap
+      let tAttempts = 0;
+      for (let i = 0; i < T && tAttempts < MAX_RETRY_ATTEMPTS; i++) {
+        tAttempts++;
+        const found = slotAllocator.findFreeSlot(actualFacultyId, courseSection);
+        if (!found) {
+          console.warn(`WARNING: Could not find slot for ${course_code} T session ${i + 1}`);
+          continue;
+        }
+
+        const room = roomSelector.findRoomByStrength('T', section_strength, found.day, found.slot, course.room_requirements || [], course_code);
+        if (!room) {
+          console.warn(`WARNING: No room for ${course_code} T session ${i + 1}`);
+          continue;
+        }
+
+        slotAllocator.bookSlot(actualFacultyId, courseSection, room.room_id, found.day, found.slot);
+        roomSelector.bookRoom(room.room_id, found.day, found.slot);
+
+        sectionEntries.push({
+          course_code,
+          course_name: name,
+          faculty_id: actualFacultyId,
+          section: courseSection,
+          day: found.day,
+          slot_id: found.slot,
+          slot_label: timeSlots.slots.find(s => s.id === found.slot)?.label || '',
+          room_id: room.room_id,
+          room_name: room.name,
+          room_capacity: room.capacity,
+          type: 'T',
+          room_requirements: course.room_requirements || []
+        });
+      }
+
+      // Schedule P practicals (2-hour contiguous blocks) with retry cap
+      let pAttempts = 0;
+      for (let i = 0; i < P && pAttempts < MAX_RETRY_ATTEMPTS; i++) {
+        pAttempts++;
+        const contiguous = slotAllocator.findContiguousSlots(actualFacultyId, courseSection, '_LAB', 2);
+        if (!contiguous) {
+          console.warn(`WARNING: Could not find contiguous slots for ${course_code} P session ${i + 1}`);
+          continue;
+        }
+
+        const firstSlot = contiguous[0];
+        // For practical sessions, always pass room requirements
+        let room = roomSelector.findRoom('P', section_strength, firstSlot.day, firstSlot.slot, course.room_requirements || [], course_code);
+
+        if (!room) {
+          console.warn(`WARNING: No lab room for ${course_code} P session ${i + 1}, using classroom`);
+          room = roomSelector.findRoom('L', section_strength, firstSlot.day, firstSlot.slot, course.room_requirements || [], course_code);
+          if (!room) {
+            console.warn(`WARNING: No room available for ${course_code} P session ${i + 1}`);
+            continue;
+          }
+        }
+
+        for (const cs of contiguous) {
+          slotAllocator.bookSlot(actualFacultyId, courseSection, room.room_id, cs.day, cs.slot);
+          roomSelector.bookRoom(room.room_id, cs.day, cs.slot);
+        }
+
+        const slotLabels = contiguous.map(cs =>
+          timeSlots.slots.find(s => s.id === cs.slot)?.label || ''
+        ).join(' - ');
+
+        sectionEntries.push({
+          course_code,
+          course_name: name,
+          faculty_id: actualFacultyId,
+          section: courseSection,
+          day: firstSlot.day,
+          slot_id: contiguous.map(c => c.slot),
+          slot_label: slotLabels,
+          room_id: room.room_id,
+          room_name: room.name,
+          room_capacity: room.capacity,
+          type: 'P',
+          room_requirements: course.room_requirements || []
+        });
+      }
+    }
+
+    allNonElectiveEntries.push(...sectionEntries);
+  }
+
+  // Step 5: Merge elective and non-elective entries
+  const allEntries = [...electiveEntries, ...allNonElectiveEntries];
+
   return allEntries;
 }
 

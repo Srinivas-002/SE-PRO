@@ -15,6 +15,15 @@ function generateExamSchedule(courses, rooms, config) {
   // Filter out labs - only use classrooms and halls for exams
   const examRooms = rooms.filter(r => r.type !== 'lab');
 
+  // Validate daysAvailable is sufficient for number of courses
+  const uniqueCourses = new Set(courses.map(c => c.course_code));
+  const maxExamsPerDay = 4; // Hard limit in scheduling logic
+  const minDaysNeeded = Math.ceil(uniqueCourses.size / maxExamsPerDay);
+
+  if (daysAvailable < minDaysNeeded) {
+    throw new Error(`Need at least ${minDaysNeeded} days to schedule ${uniqueCourses.size} exams (max 4 exams/day)`);
+  }
+
   // Sort rooms by capacity (smaller first for efficiency)
   examRooms.sort((a, b) => a.capacity - b.capacity);
 
@@ -117,6 +126,7 @@ function generateExamSchedule(courses, rooms, config) {
 
       for (let i = 0; i < count; i++) {
         // Find available faculty (round-robin, not used in this slot)
+        let assigned = false;
         for (const faculty of facultyList) {
           const slotKey = `${date}-${slot}`;
           const facultyKey = `${faculty.faculty_id}-${slotKey}`;
@@ -129,8 +139,19 @@ function generateExamSchedule(courses, rooms, config) {
             });
             usedFaculty.add(facultyKey);
             facultySlotAssignments.set(facultyKey, true);
+            assigned = true;
             break;
           }
+        }
+
+        // Fallback: if no faculty available, assign "TBA"
+        if (!assigned) {
+          console.warn(`WARNING: No invigilator available for ${date} slot ${slot}, assigning "TBA"`);
+          invigilators.push({
+            faculty_id: 'TBA',
+            name: 'TBA',
+            room_id: room.room_id
+          });
         }
       }
     }

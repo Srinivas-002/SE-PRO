@@ -195,6 +195,62 @@ function validateTimetable(entries, courses) {
     }
   }
 
+  // 5. Check room capacity vs section strength
+  // Build a map of course-section to section_strength
+  const courseStrengthMap = new Map();
+  for (const course of courses) {
+    const key = `${course.course_code}-${course.section}`;
+    courseStrengthMap.set(key, course.section_strength);
+  }
+
+  // Check each entry for capacity issues
+  for (const entry of entries) {
+    const key = `${entry.course_code}-${entry.section}`;
+    const sectionStrength = courseStrengthMap.get(key);
+
+    if (sectionStrength === undefined) {
+      continue; // Skip if we don't have strength data
+    }
+
+    // Get room capacity from the entry (we need to look it up from rooms)
+    // Since we don't have rooms here, we'll check based on room_id stored in entry
+    // The room capacity should be passed or looked up
+    // For now, we'll add the check structure - the actual capacity needs to be passed in
+
+    // ERROR: room capacity < section_strength (under-capacity)
+    if (entry.room_capacity && entry.room_capacity < sectionStrength) {
+      conflicts.push({
+        type: 'ROOM_UNDER_CAPACITY',
+        description: `Room ${entry.room_name} (capacity ${entry.room_capacity}) is too small for ${entry.course_code} (${entry.section}) with ${sectionStrength} students`,
+        affected: {
+          room_id: entry.room_id,
+          room_name: entry.room_name,
+          course_code: entry.course_code,
+          section: entry.section,
+          room_capacity: entry.room_capacity,
+          section_strength: sectionStrength
+        }
+      });
+    }
+
+    // WARNING: room capacity > section_strength * 2 (room wastage)
+    if (entry.room_capacity && entry.room_capacity > sectionStrength * 2) {
+      conflicts.push({
+        type: 'ROOM_WASTAGE',
+        description: `Room ${entry.room_name} (capacity ${entry.room_capacity}) is too large for ${entry.course_code} (${entry.section}) with ${sectionStrength} students`,
+        affected: {
+          room_id: entry.room_id,
+          room_name: entry.room_name,
+          course_code: entry.course_code,
+          section: entry.section,
+          room_capacity: entry.room_capacity,
+          section_strength: sectionStrength,
+          utilization: Math.round((sectionStrength / entry.room_capacity) * 100) + '%'
+        }
+      });
+    }
+  }
+
   return {
     valid: conflicts.length === 0 && missingHours.length === 0,
     conflicts,

@@ -13,6 +13,12 @@ const examStartDate = document.getElementById('exam-start-date');
 const fileList = document.getElementById('file-list');
 const resultsContainer = document.getElementById('results-container');
 const validationContainer = document.getElementById('validation-container');
+const healthStatus = document.getElementById('health-status');
+
+// Time Slot Settings Elements
+const previewTimeslotsBtn = document.getElementById('preview-timeslots-btn');
+const saveTimeslotsBtn = document.getElementById('save-timeslots-btn');
+const timeslotsPreview = document.getElementById('timeslots-preview');
 
 const spinners = {
   timetable: document.getElementById('timetable-spinner'),
@@ -33,8 +39,41 @@ function setDefaultExamDate() {
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   setDefaultExamDate();
+  checkHealth();
   loadFileList();
 });
+
+// ========== Health Check ==========
+
+async function checkHealth() {
+  try {
+    const response = await fetch('/api/health');
+    const data = await response.json();
+
+    if (data.status === 'ok') {
+      showHealthStatus('Server ready - ' + data.dataFiles + ' data files, ' + data.outputFiles + ' output files', 'success');
+    } else {
+      showHealthStatus('Server status: ' + data.status, 'error');
+    }
+  } catch (error) {
+    showHealthStatus('Server unreachable: ' + error.message, 'error');
+  }
+}
+
+function showHealthStatus(message, type) {
+  if (!healthStatus) {
+    // Create status bar if it doesn't exist
+    const statusBar = document.createElement('div');
+    statusBar.id = 'health-status';
+    statusBar.className = type === 'success' ? 'status-bar status-success' : 'status-bar status-error';
+    statusBar.innerHTML = '<span class="status-message">' + message + '</span>';
+    document.body.insertBefore(statusBar, document.body.firstChild);
+  } else {
+    healthStatus.className = 'status-bar ' + (type === 'success' ? 'status-success' : 'status-error');
+    healthStatus.innerHTML = '<span class="status-message">' + message + '</span>';
+    healthStatus.style.display = 'block';
+  }
+}
 
 // ========== Upload Functions ==========
 
@@ -70,7 +109,16 @@ async function uploadFiles() {
     const data = await response.json();
 
     if (data.success) {
-      showResult(`Successfully uploaded ${data.uploadedFiles.length} file(s).`, 'success');
+      // Extract section names from uploaded course files
+      const sections = extractSectionsFromFiles(coursesFiles);
+
+      let message = `Successfully uploaded ${data.uploadedFiles.length} file(s).`;
+      if (sections.length > 0) {
+        message += ` ${sections.length} section(s) detected: ${sections.join(', ')}`;
+        displaySectionTags(sections);
+      }
+
+      showResult(message, 'success');
       loadFileList();
       // Reset file inputs
       document.getElementById('rooms-file').value = '';
@@ -85,6 +133,44 @@ async function uploadFiles() {
   } finally {
     setLoading(false);
   }
+}
+
+/**
+ * Extract section names from uploaded course CSV files
+ * @param {FileList} files - FileList from file input
+ * @returns {string[]} Array of section names
+ */
+function extractSectionsFromFiles(files) {
+  const sections = [];
+  for (const file of files) {
+    let sectionName = file.name.replace('.csv', '');
+    if (sectionName.startsWith('courses_')) {
+      sectionName = sectionName.replace('courses_', '');
+    }
+    sections.push(sectionName);
+  }
+  return sections.sort();
+}
+
+/**
+ * Display section tags/chips in the upload section
+ * @param {string[]} sections - Array of section names
+ */
+function displaySectionTags(sections) {
+  const uploadSection = document.getElementById('upload-section');
+  let tagsContainer = uploadSection.querySelector('.section-tags');
+
+  if (!tagsContainer) {
+    tagsContainer = document.createElement('div');
+    tagsContainer.className = 'section-tags';
+    tagsContainer.innerHTML = '<h4>Detected Sections</h4><div class="tags-list"></div>';
+    uploadSection.querySelector('.upload-form').insertAdjacentElement('afterend', tagsContainer);
+  }
+
+  const tagsList = tagsContainer.querySelector('.tags-list');
+  tagsList.innerHTML = sections.map(section => `
+    <span class="tag-chip">${section}</span>
+  `).join('');
 }
 
 async function loadFileList() {
@@ -158,6 +244,9 @@ async function generateTimetable() {
 
       // Enable faculty timetable button
       generateFacultyBtn.disabled = false;
+
+      // Auto-refresh file list
+      loadFileList();
     } else {
       showResult(`Generation failed: ${data.error}`, 'error');
     }
@@ -187,6 +276,9 @@ async function generateExam() {
         showResult(message, 'success');
       }
       showDownloadButton(data.file);
+
+      // Auto-refresh file list
+      loadFileList();
     } else {
       showResult(`Generation failed: ${data.error}`, 'error');
     }
@@ -210,6 +302,9 @@ async function generateFaculty() {
     if (data.success) {
       showResult(`Generated faculty timetables for ${data.facultyCount} faculty members.`, 'success');
       showDownloadButton(data.file);
+
+      // Auto-refresh file list
+      loadFileList();
     } else {
       showResult(`Generation failed: ${data.error}`, 'error');
     }
@@ -232,7 +327,7 @@ async function runValidation() {
     const data = await response.json();
 
     if (data.validation) {
-      displayValidationResults(data.validation);
+      displayValidationResults(data.validation, data.roomUtilization);
     } else {
       showResult('Validation failed to run.', 'error');
     }
@@ -243,10 +338,11 @@ async function runValidation() {
   }
 }
 
-function displayValidationResults(validation) {
+function displayValidationResults(validation, roomUtilization) {
   const { conflicts, missingHours, valid } = validation;
 
-  let html = '<table class="validation-table">';
+  let html = '<h3>Validation Results</h3>';
+  html += '<table class="validation-table">';
   html += '<thead><tr><th>Type</th><th>Description</th><th>Affected</th></tr></thead>';
   html += '<tbody>';
 
@@ -277,6 +373,26 @@ function displayValidationResults(validation) {
   }
 
   html += '</tbody></table>';
+
+  // Add room utilization summary
+  if (roomUtilization && roomUtilization.length > 0) {
+    html += '<h3>Room Utilization Summary</h3>';
+    html += '<table class="utilization-table">';
+    html += '<thead><tr><th>Room</th><th>Total Sessions</th><th>Avg Occupancy %</th></tr></thead>';
+    html += '<tbody>';
+
+    for (const room of roomUtilization) {
+      const occupancyClass = room.avgOccupancy > 60 ? 'high' :
+                             room.avgOccupancy >= 40 ? 'medium' : 'low';
+      html += `<tr class="utilization-${occupancyClass}">`;
+      html += `<td>${room.room_name} (${room.capacity})</td>`;
+      html += `<td>${room.totalSessions}</td>`;
+      html += `<td><span class="occupancy-badge ${occupancyClass}">${room.avgOccupancy}%</span></td>`;
+      html += '</tr>';
+    }
+
+    html += '</tbody></table>';
+  }
 
   validationContainer.innerHTML = html;
 }
@@ -339,4 +455,91 @@ function formatDate(dateString) {
 
 function formatConflictType(type) {
   return type.replace(/_/g, ' ');
+}
+
+// ========== Time Slot Settings ==========
+
+previewTimeslotsBtn.addEventListener('click', previewTimeSlots);
+saveTimeslotsBtn.addEventListener('click', saveTimeSlotsConfig);
+
+async function previewTimeSlots() {
+  const config = getTimeSlotsConfig();
+
+  try {
+    const response = await fetch('/api/timeslots/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+
+    const data = await response.json();
+
+    if (data.slots) {
+      displayTimeSlotsPreview(data.slots, data.breakSlots);
+    } else {
+      showResult('Preview failed: ' + (data.error || 'Unknown error'), 'error');
+    }
+  } catch (error) {
+    showResult('Preview failed: ' + error.message, 'error');
+  }
+}
+
+async function saveTimeSlotsConfig() {
+  const config = getTimeSlotsConfig();
+
+  try {
+    const response = await fetch('/api/timeslots/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+      showResult('Time slot configuration saved successfully.', 'success');
+      // Refresh file list to show updated config
+      loadFileList();
+    } else {
+      showResult('Save failed: ' + (data.error || 'Unknown error'), 'error');
+    }
+  } catch (error) {
+    showResult('Save failed: ' + error.message, 'error');
+  }
+}
+
+function getTimeSlotsConfig() {
+  return {
+    startTime: document.getElementById('ts-start-time').value,
+    endTime: document.getElementById('ts-end-time').value,
+    periodDuration: parseInt(document.getElementById('ts-period-duration').value, 10),
+    breakAfterPeriod: parseInt(document.getElementById('ts-break-after').value, 10),
+    lunchDuration: parseInt(document.getElementById('ts-lunch-duration').value, 10),
+    shortBreakDuration: parseInt(document.getElementById('ts-short-break').value, 10)
+  };
+}
+
+function displayTimeSlotsPreview(slots, breakSlots) {
+  if (!slots || slots.length === 0) {
+    timeslotsPreview.innerHTML = '<p class="text-muted">No slots generated. Check your configuration.</p>';
+    return;
+  }
+
+  let html = '<table class="timeslots-table"><thead><tr>';
+  html += '<th>ID</th><th>Label</th><th>Start</th><th>End</th><th>Type</th>';
+  html += '</tr></thead><tbody>';
+
+  for (const slot of slots) {
+    const isBreak = breakSlots.includes(slot.id);
+    html += `<tr class="${isBreak ? 'break-row' : ''}">`;
+    html += `<td>${slot.id}</td>`;
+    html += `<td>${slot.label}</td>`;
+    html += `<td>${slot.start || '-'}</td>`;
+    html += `<td>${slot.end || '-'}</td>`;
+    html += `<td><span class="type-badge ${isBreak ? 'warning' : 'ok'}">${isBreak ? 'Break' : 'Class'}</span></td>`;
+    html += '</tr>';
+  }
+
+  html += '</tbody></table>';
+  timeslotsPreview.innerHTML = html;
 }
