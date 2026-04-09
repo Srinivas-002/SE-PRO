@@ -136,13 +136,17 @@ async function loadCourses(filename, facultyByName) {
         results.push({
           course_code: row.Course_Code,
           course_title: row.Course_Title,
+          name: row.Course_Title, // Alias for backward compatibility
           L, T, P, S, C,
           faculty_ids: facultyIds,
+          faculty_id: facultyIds.length > 0 ? facultyIds[0] : null, // Alias for backward compatibility
           faculty_name_raw: unresolvedNames.length > 0 ? unresolvedNames.join(' & ') : null,
           is_combined: isCombined,
           semester_half: semesterHalf,
+          is_elective: elective === 1, // Alias for backward compatibility
           elective: elective,
           students_enrolled: studentsEnrolled,
+          section_strength: studentsEnrolled, // Alias for backward compatibility
           basket: basket,
           section: section
         });
@@ -259,7 +263,7 @@ async function loadTimeSlots() {
       slots,
       breakSlots
     };
-  } else {
+  } else if (config.slots) {
     // Legacy format: use hardcoded slots
     const slots = config.slots.filter(slot => !slot.is_break);
     const breakSlots = config.slots.filter(slot => slot.is_break === true);
@@ -268,6 +272,9 @@ async function loadTimeSlots() {
       slots,
       breakSlots
     };
+  } else {
+    // Minimal config: use defaults
+    return generateTimeSlots({});
   }
 }
 

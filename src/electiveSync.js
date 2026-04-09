@@ -35,8 +35,12 @@ function assignElectiveSlots(electiveGroups, slotAllocator, roomSelector, timeSl
   const slots = slotAllocator.slots;
 
   for (const [courseCode, courses] of electiveGroups) {
-    // Collect all faculty and sections for this elective
-    const facultyIds = [...new Set(courses.map(c => c.faculty_id))];
+    // Collect all faculty and sections for this elective (supports both faculty_id and faculty_ids)
+    const facultyIds = [...new Set(courses.flatMap(c => {
+      if (Array.isArray(c.faculty_ids)) return c.faculty_ids;
+      if (c.faculty_id) return [c.faculty_id];
+      return [];
+    }))];
     const sections = courses.map(c => c.section);
 
     // Try to find a common slot that works for all faculty and ALL sections simultaneously
@@ -75,16 +79,23 @@ function assignElectiveSlots(electiveGroups, slotAllocator, roomSelector, timeSl
     for (const course of courses) {
       const { day, slotId } = foundSlot;
 
+      // Get faculty IDs for this course (supports both faculty_id and faculty_ids)
+      const courseFacultyIds = Array.isArray(course.faculty_ids) ? course.faculty_ids :
+                               (course.faculty_id ? [course.faculty_id] : []);
+
       // Find a room for this section
-      const room = roomSelector.findRoom('L', course.section_strength, course.name, day, slotId, course.course_code);
+      const room = roomSelector.findRoom('L', course.section_strength || course.students_enrolled || 60,
+                                         course.name || course.course_title, day, slotId, course.course_code);
 
       if (!room) {
         console.warn(`WARNING: No room available for ${course.course_code} (${course.section}) at ${day} slot ${slotId}`);
         continue;
       }
 
-      // Book the slot in slotAllocator
-      slotAllocator.bookSlot(course.faculty_id, course.section, room.room_id, day, slotId);
+      // Book the slot in slotAllocator for each faculty
+      for (const fid of courseFacultyIds) {
+        slotAllocator.bookSlot(fid, course.section, room.room_id, day, slotId);
+      }
 
       // Book the room in roomSelector
       roomSelector.bookRoom(room.room_id, day, slotId);
@@ -95,8 +106,8 @@ function assignElectiveSlots(electiveGroups, slotAllocator, roomSelector, timeSl
       // Add to assignments
       assignments.push({
         course_code: course.course_code,
-        course_name: course.name,
-        faculty_id: course.faculty_id,
+        course_name: course.name || course.course_title,
+        faculty_id: course.faculty_id || (courseFacultyIds.length > 0 ? courseFacultyIds[0] : 'TBA'),
         section: course.section,
         day,
         slot_id: slotId,

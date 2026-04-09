@@ -112,21 +112,23 @@ function generateTimetable(courses, rooms, timeSlots) {
         // Schedule each session type
         for (const session of sessions) {
           const { type, duration, count } = session;
+          let scheduledCount = 0;
           let attempts = 0;
 
-          for (let i = 0; i < count && attempts < MAX_RETRY_ATTEMPTS; i++) {
+          while (scheduledCount < count && attempts < MAX_RETRY_ATTEMPTS) {
             attempts++;
 
             if (type === 'P') {
               const found = slotAllocator.findFreeSlot(actualFacultyId, courseSection, null, 90);
               if (!found) {
-                console.warn(`WARNING: Could not find slot for ${course_code} ${type} session ${i + 1}`);
-                continue;
+                console.warn(`WARNING: Could not find slot for ${course_code} ${type} session ${scheduledCount + 1} (attempt ${attempts})`);
+                continue; // Try next slot, don't break
               }
 
               const room = roomSelector.findRoom('P', students_enrolled || 60, course_title, found.day, found.slot, course_code);
               if (!room) {
-                console.warn(`WARNING: No room for ${course_code} ${type} session ${i + 1}`);
+                console.warn(`WARNING: No room for ${course_code} ${type} session ${scheduledCount + 1} (attempt ${attempts})`);
+                // Don't break - release this attempt and try next available slot
                 continue;
               }
 
@@ -149,17 +151,18 @@ function generateTimetable(courses, rooms, timeSlots) {
                 room_requirements: course.room_requirements || [],
                 duration: 90
               });
+              scheduledCount++;
             } else {
               const found = slotAllocator.findFreeSlot(actualFacultyId, courseSection, null, duration);
               if (!found) {
-                console.warn(`WARNING: Could not find slot for ${course_code} ${type} session ${i + 1}`);
-                continue;
+                console.warn(`WARNING: Could not find slot for ${course_code} ${type} session ${scheduledCount + 1} (attempt ${attempts})`);
+                continue; // Try next slot, don't break
               }
 
               const room = roomSelector.findRoom(type, students_enrolled || 60, course_title, found.day, found.slot, course_code);
               if (!room) {
-                console.warn(`WARNING: No room for ${course_code} ${type} session ${i + 1}`);
-                continue;
+                console.warn(`WARNING: No room for ${course_code} ${type} session ${scheduledCount + 1} (attempt ${attempts})`);
+                continue; // Try next slot, don't break
               }
 
               slotAllocator.bookSlot(actualFacultyId, courseSection, room.room_id, found.day, found.slot);
@@ -181,17 +184,23 @@ function generateTimetable(courses, rooms, timeSlots) {
                 room_requirements: course.room_requirements || [],
                 duration
               });
+              scheduledCount++;
             }
+          }
+
+          // Log if not all sessions were scheduled
+          if (scheduledCount < count) {
+            console.error(`ERROR: Only ${scheduledCount}/${count} ${type} sessions scheduled for ${course_code} (${course_title}) - gave up after ${attempts} attempts`);
           }
         }
       }
-    } else {
+
       // === REGULAR SEMESTER: Use existing logic ===
 
       const sectionEntries = [];
 
       for (const course of sectionCourses) {
-        const { course_code, name, faculty_id, section: courseSection, L, T, P, section_strength, is_elective } = course;
+        const { course_code, course_title, faculty_id, section: courseSection, L, T, P, students_enrolled, is_elective } = course;
 
         const actualFacultyId = faculty_id || 'TBA';
         if (!faculty_id) {
@@ -202,21 +211,22 @@ function generateTimetable(courses, rooms, timeSlots) {
 
         for (const session of sessions) {
           const { type, duration, count } = session;
+          let scheduledCount = 0;
           let attempts = 0;
 
-          for (let i = 0; i < count && attempts < MAX_RETRY_ATTEMPTS; i++) {
+          while (scheduledCount < count && attempts < MAX_RETRY_ATTEMPTS) {
             attempts++;
 
             if (type === 'P') {
               const found = slotAllocator.findFreeSlot(actualFacultyId, courseSection, null, 90);
               if (!found) {
-                console.warn(`WARNING: Could not find slot for ${course_code} ${type} session ${i + 1}`);
+                console.warn(`WARNING: Could not find slot for ${course_code} ${type} session ${scheduledCount + 1} (attempt ${attempts})`);
                 continue;
               }
 
-              const room = roomSelector.findRoom('P', section_strength, name, found.day, found.slot, course_code);
+              const room = roomSelector.findRoom('P', students_enrolled || 60, course_title, found.day, found.slot, course_code);
               if (!room) {
-                console.warn(`WARNING: No room for ${course_code} ${type} session ${i + 1}`);
+                console.warn(`WARNING: No room for ${course_code} ${type} session ${scheduledCount + 1} (attempt ${attempts})`);
                 continue;
               }
 
@@ -226,7 +236,7 @@ function generateTimetable(courses, rooms, timeSlots) {
               const slotLabel = timeSlots.slots.find(s => s.id === found.slot)?.label || '';
               sectionEntries.push({
                 course_code,
-                course_name: name,
+                course_name: course_title,
                 faculty_id: actualFacultyId,
                 section: courseSection,
                 day: found.day,
@@ -239,16 +249,17 @@ function generateTimetable(courses, rooms, timeSlots) {
                 room_requirements: course.room_requirements || [],
                 duration: 90
               });
+              scheduledCount++;
             } else {
               const found = slotAllocator.findFreeSlot(actualFacultyId, courseSection, null, duration);
               if (!found) {
-                console.warn(`WARNING: Could not find slot for ${course_code} ${type} session ${i + 1}`);
+                console.warn(`WARNING: Could not find slot for ${course_code} ${type} session ${scheduledCount + 1} (attempt ${attempts})`);
                 continue;
               }
 
-              const room = roomSelector.findRoom(type, section_strength, name, found.day, found.slot, course_code);
+              const room = roomSelector.findRoom(type, students_enrolled || 60, course_title, found.day, found.slot, course_code);
               if (!room) {
-                console.warn(`WARNING: No room for ${course_code} ${type} session ${i + 1}`);
+                console.warn(`WARNING: No room for ${course_code} ${type} session ${scheduledCount + 1} (attempt ${attempts})`);
                 continue;
               }
 
@@ -258,7 +269,7 @@ function generateTimetable(courses, rooms, timeSlots) {
               const slotLabel = timeSlots.slots.find(s => s.id === found.slot)?.label || '';
               sectionEntries.push({
                 course_code,
-                course_name: name,
+                course_name: course_title,
                 faculty_id: actualFacultyId,
                 section: courseSection,
                 day: found.day,
@@ -271,7 +282,13 @@ function generateTimetable(courses, rooms, timeSlots) {
                 room_requirements: course.room_requirements || [],
                 duration
               });
+              scheduledCount++;
             }
+          }
+
+          // Log if not all sessions were scheduled
+          if (scheduledCount < count) {
+            console.error(`ERROR: Only ${scheduledCount}/${count} ${type} sessions scheduled for ${course_code} (${course_title}) - gave up after ${attempts} attempts`);
           }
         }
       }

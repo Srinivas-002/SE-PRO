@@ -50,6 +50,8 @@ class RoomSelector {
     if (lowerType.includes('classroom')) return 'classroom';
     if (lowerType.includes('lab')) return 'lab';
     if (lowerType.includes('hall')) return 'hall';
+    // Handle "120-Seater Hall" and "240-Seater Hall" types
+    if (lowerType.includes('seater')) return 'hall';
     return lowerType; // fallback
   }
 

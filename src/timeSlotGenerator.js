@@ -1,6 +1,7 @@
 /**
  * timeSlotGenerator.js - Dynamic time slot generator with dual-duration support
  * Generates 60min (1hr) and 90min (1.5hr) slots with 15min gaps between classes
+ * Enforces lunch break between 12:30-14:00 with minimum 45 minutes
  */
 
 /**
@@ -10,7 +11,9 @@
  * @param {string} config.endTime - End time in HH:MM format (e.g., "18:00")
  * @param {number} config.gapDuration - Gap between classes in minutes (default: 15)
  * @param {number} config.breakAfterPeriod - Insert lunch after this many periods (default: 4)
- * @param {number} config.lunchDuration - Lunch break duration in minutes (default: 60)
+ * @param {string} config.lunchStartTime - Earliest lunch start time (default: "12:30")
+ * @param {string} config.lunchEndTime - Latest lunch end time (default: "13:30")
+ * @param {number} config.minLunchDuration - Minimum lunch duration in minutes (default: 45)
  * @returns {Object} { days: string[], slots: Array, breakSlots: Array }
  */
 function generateTimeSlots(config) {
@@ -19,54 +22,90 @@ function generateTimeSlots(config) {
     endTime = "18:00",
     gapDuration = 15,
     breakAfterPeriod = 4,
-    lunchDuration = 60
+    lunchStartTime = "12:30",
+    lunchEndTime = "13:30",
+    minLunchDuration = 45
   } = config;
 
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
   const slots = [];
   const breakSlots = [];
 
-  // Parse start time
+  // Parse times
   const [startHour, startMin] = startTime.split(':').map(Number);
   const [endHour, endMin] = endTime.split(':').map(Number);
+  const [lunchStartH, lunchStartM] = lunchStartTime.split(':').map(Number);
+  const [lunchEndH, lunchEndM] = lunchEndTime.split(':').map(Number);
 
   const startMinutes = startHour * 60 + startMin;
   const endMinutes = endHour * 60 + endMin;
+  const lunchStartMinutes = lunchStartH * 60 + lunchStartM;
+  const lunchEndMinutes = lunchEndH * 60 + lunchEndM;
 
   let currentMinutes = startMinutes;
   let slotId = 1;
-  let periodsSinceLunch = 0;
+  let periodCount = 0;
+  let lunchScheduled = false;
 
   while (currentMinutes < endMinutes) {
-    // Check if we need to insert lunch break
-    if (periodsSinceLunch >= breakAfterPeriod) {
-      // Insert lunch break
-      const lunchEndMinutes = currentMinutes + lunchDuration;
+    // Check if we've reached the lunch window (12:30)
+    if (!lunchScheduled && currentMinutes >= lunchStartMinutes) {
+      // Schedule lunch break - must start by 12:30 and end by 13:30 (or later up to 14:00)
+      // Calculate actual lunch duration: from current time to lunch end, minimum 45 min
+      const actualLunchStart = Math.max(currentMinutes, lunchStartMinutes);
+      const actualLunchEnd = Math.min(lunchEndMinutes + 30, endMinutes); // Allow up to 14:00
+      const actualLunchDuration = actualLunchEnd - actualLunchStart;
 
-      // Only add lunch if it fits before end time
-      if (lunchEndMinutes <= endMinutes) {
-        breakSlots.push(slotId);
-        slots.push({
-          id: slotId,
-          label: "Lunch Break",
-          start: formatTime(currentMinutes),
-          end: formatTime(lunchEndMinutes),
-          duration: lunchDuration,
-          is_break: true
-        });
-        slotId++;
-        currentMinutes = lunchEndMinutes;
-        periodsSinceLunch = 0;
-        continue;
-      }
+      // Ensure minimum 45 min lunch
+      const lunchDuration = Math.max(actualLunchDuration, minLunchDuration);
+
+      breakSlots.push(slotId);
+      slots.push({
+        id: slotId,
+        label: "Lunch Break",
+        start: formatTime(actualLunchStart),
+        end: formatTime(actualLunchStart + lunchDuration),
+        duration: lunchDuration,
+        is_break: true
+      });
+      slotId++;
+      currentMinutes = actualLunchStart + lunchDuration;
+      lunchScheduled = true;
+      periodCount = 0;
+      continue;
+    }
+
+    // Check if we need to force lunch before 14:00
+    if (!lunchScheduled && currentMinutes + 90 >= lunchEndMinutes + 30) {
+      // Force lunch now to ensure it ends by 14:00
+      const actualLunchStart = currentMinutes;
+      const lunchDuration = Math.max(minLunchDuration, lunchEndMinutes + 30 - currentMinutes);
+
+      breakSlots.push(slotId);
+      slots.push({
+        id: slotId,
+        label: "Lunch Break",
+        start: formatTime(actualLunchStart),
+        end: formatTime(actualLunchStart + lunchDuration),
+        duration: lunchDuration,
+        is_break: true
+      });
+      slotId++;
+      currentMinutes = actualLunchStart + lunchDuration;
+      lunchScheduled = true;
+      periodCount = 0;
+      continue;
     }
 
     // Generate both 60min and 90min slots from the same timeline
     // Each slot type gets its own entry but they share the timeline
 
-    // 60-minute slot (1hr)
+    // 60-minute slot (1hr) - only if it fits completely before or after lunch
     const period60EndMinutes = currentMinutes + 60;
-    if (period60EndMinutes <= endMinutes) {
+    const fits60BeforeLunch = period60EndMinutes <= lunchStartMinutes;
+    const fits60AfterLunch = currentMinutes >= lunchEndMinutes + 30;
+
+    if ((fits60BeforeLunch || fits60AfterLunch) && period60EndMinutes <= endMinutes) {
       slots.push({
         id: slotId,
         label: `${formatTime(currentMinutes)}-${formatTime(period60EndMinutes)}`,
@@ -80,7 +119,10 @@ function generateTimeSlots(config) {
 
     // 90-minute slot (1.5hr) - starts at same time, extends further
     const period90EndMinutes = currentMinutes + 90;
-    if (period90EndMinutes <= endMinutes) {
+    const fits90BeforeLunch = period90EndMinutes <= lunchStartMinutes;
+    const fits90AfterLunch = currentMinutes >= lunchEndMinutes + 30;
+
+    if ((fits90BeforeLunch || fits90AfterLunch) && period90EndMinutes <= endMinutes) {
       slots.push({
         id: slotId,
         label: `${formatTime(currentMinutes)}-${formatTime(period90EndMinutes)}`,
@@ -93,9 +135,8 @@ function generateTimeSlots(config) {
     }
 
     // Move current time forward by the longer period + gap
-    // The 90min slot determines when the next block can start
     currentMinutes = period90EndMinutes + gapDuration;
-    periodsSinceLunch++;
+    periodCount++;
   }
 
   return { days, slots, breakSlots };

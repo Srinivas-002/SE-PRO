@@ -143,69 +143,169 @@ function assignBasketSlots(basketMap, slotAllocator, roomSelector, facultyMap) {
     // Mark this slot as used for baskets
     usedBasketSlots.add(`${foundSlot.day}-${foundSlot.slotId}`);
 
-    // Assign each course in the basket to this shared slot
+    // Assign each course in the basket to this shared slot for the FIRST lecture
+    // Then schedule remaining sessions (additional L, T, P) independently
     for (const course of basketCourses) {
       const { day, slotId } = foundSlot;
 
-      // Check if course has enrolled students
-      if (!course.students_enrolled || course.students_enrolled === 0) {
-        console.warn(`WARNING: Basket ${basketNum} course ${course.course_code} has 0 enrolled, skipping room assignment`);
-        // Still add the assignment but without room
-        assignments.push({
-          course_code: course.course_code,
-          course_name: course.course_title,
-          faculty_ids: course.faculty_ids,
-          section: course.section,
+      // Get faculty IDs for this course
+      const courseFacultyIds = Array.isArray(course.faculty_ids) ? course.faculty_ids :
+                               (course.faculty_id ? [course.faculty_id] : []);
+      const actualFacultyId = courseFacultyIds.length > 0 ? courseFacultyIds[0] : 'TBA';
+
+      // Get enrolled count - used for all session types
+      const enrolledCount = course.students_enrolled || 60;
+
+      // Schedule the FIRST lecture at the shared basket slot
+      if (course.L > 0) {
+        const room = roomSelector.findRoom(
+          'L',
+          enrolledCount,
+          course.course_title,
           day,
-          slot_id: slotId,
-          room_id: 'TBA',
-          type: 'L',
-          basket_number: basketNum,
-          is_elective: true,
-          students_enrolled: course.students_enrolled || 0
-        });
-        continue;
+          slotId,
+          course.course_code
+        );
+
+        if (room) {
+          // Book slot for each faculty in this course
+          for (const facultyId of courseFacultyIds) {
+            slotAllocator.bookSlot(facultyId, course.section, room.room_id, day, slotId);
+          }
+
+          // Book the room
+          roomSelector.bookRoom(room.room_id, day, slotId);
+
+          // Get slot label
+          const slotLabel = slots.find(s => s.id === slotId)?.label || '';
+
+          // Add first lecture assignment
+          assignments.push({
+            course_code: course.course_code,
+            course_name: course.course_title,
+            faculty_id: actualFacultyId,
+            faculty_ids: courseFacultyIds,
+            section: course.section,
+            day,
+            slot_id: slotId,
+            slot_label: slotLabel,
+            room_id: room.room_id,
+            room_name: room.name,
+            room_capacity: room.capacity,
+            type: 'L',
+            basket_number: basketNum,
+            is_elective: true,
+            students_enrolled: enrolledCount,
+            duration: 60
+          });
+        }
       }
 
-      // Find room based on enrolled students (not section strength)
-      const room = roomSelector.findRoom(
-        'L',
-        course.students_enrolled,
-        course.course_title,
-        day,
-        slotId,
-        course.course_code
-      );
+      // Now schedule REMAINING sessions (additional L, T, P) independently
+      // This handles L>1, T>0, P>0 from the course's L-T-P-S-C values
+      const remainingLectures = course.L > 1 ? course.L - 1 : 0;
+      const tutorials = course.T || 0;
+      const practicals = course.P ? course.P / 2 : 0;
 
-      if (!room) {
-        console.warn(`WARNING: No room for basket ${basketNum} course ${course.course_code} (${course.section})`);
-        continue;
+      // Schedule remaining lectures (60min or 90min based on L value)
+      const lectureDuration = course.L >= 3 ? 90 : 60;
+      for (let i = 0; i < remainingLectures; i++) {
+        const found = slotAllocator.findFreeSlot(actualFacultyId, course.section, null, lectureDuration);
+        if (found) {
+          const room = roomSelector.findRoom('L', enrolledCount, course.course_title, found.day, found.slot, course.course_code);
+          if (room) {
+            for (const facultyId of courseFacultyIds) {
+              slotAllocator.bookSlot(facultyId, course.section, room.room_id, found.day, found.slot);
+            }
+            roomSelector.bookRoom(room.room_id, found.day, found.slot);
+            const slotLabel = slots.find(s => s.id === found.slot)?.label || '';
+            assignments.push({
+              course_code: course.course_code,
+              course_name: course.course_title,
+              faculty_id: actualFacultyId,
+              faculty_ids: courseFacultyIds,
+              section: course.section,
+              day: found.day,
+              slot_id: found.slot,
+              slot_label: slotLabel,
+              room_id: room.room_id,
+              room_name: room.name,
+              room_capacity: room.capacity,
+              type: 'L',
+              basket_number: basketNum,
+              is_elective: true,
+              students_enrolled: enrolledCount,
+              duration: lectureDuration
+            });
+          }
+        }
       }
 
-      // Book slot for each faculty in this course
-      for (const facultyId of course.faculty_ids) {
-        slotAllocator.bookSlot(facultyId, course.section, room.room_id, day, slotId);
+      // Schedule tutorials (60min)
+      for (let i = 0; i < tutorials; i++) {
+        const found = slotAllocator.findFreeSlot(actualFacultyId, course.section, null, 60);
+        if (found) {
+          const room = roomSelector.findRoom('T', enrolledCount, course.course_title, found.day, found.slot, course.course_code);
+          if (room) {
+            for (const facultyId of courseFacultyIds) {
+              slotAllocator.bookSlot(facultyId, course.section, room.room_id, found.day, found.slot);
+            }
+            roomSelector.bookRoom(room.room_id, found.day, found.slot);
+            const slotLabel = slots.find(s => s.id === found.slot)?.label || '';
+            assignments.push({
+              course_code: course.course_code,
+              course_name: course.course_title,
+              faculty_id: actualFacultyId,
+              faculty_ids: courseFacultyIds,
+              section: course.section,
+              day: found.day,
+              slot_id: found.slot,
+              slot_label: slotLabel,
+              room_id: room.room_id,
+              room_name: room.name,
+              room_capacity: room.capacity,
+              type: 'T',
+              basket_number: basketNum,
+              is_elective: true,
+              students_enrolled: enrolledCount,
+              duration: 60
+            });
+          }
+        }
       }
 
-      // Book the room
-      roomSelector.bookRoom(room.room_id, day, slotId);
-
-      // Add to assignments
-      assignments.push({
-        course_code: course.course_code,
-        course_name: course.course_title,
-        faculty_ids: course.faculty_ids,
-        section: course.section,
-        day,
-        slot_id: slotId,
-        room_id: room.room_id,
-        room_name: room.name,
-        room_capacity: room.capacity,
-        type: 'L',
-        basket_number: basketNum,
-        is_elective: true,
-        students_enrolled: course.students_enrolled
-      });
+      // Schedule practicals (90min)
+      for (let i = 0; i < practicals; i++) {
+        const found = slotAllocator.findFreeSlot(actualFacultyId, course.section, null, 90);
+        if (found) {
+          const room = roomSelector.findRoom('P', enrolledCount, course.course_title, found.day, found.slot, course.course_code);
+          if (room) {
+            for (const facultyId of courseFacultyIds) {
+              slotAllocator.bookSlot(facultyId, course.section, room.room_id, found.day, found.slot);
+            }
+            roomSelector.bookRoom(room.room_id, found.day, found.slot);
+            const slotLabel = slots.find(s => s.id === found.slot)?.label || '';
+            assignments.push({
+              course_code: course.course_code,
+              course_name: course.course_title,
+              faculty_id: actualFacultyId,
+              faculty_ids: courseFacultyIds,
+              section: course.section,
+              day: found.day,
+              slot_id: found.slot,
+              slot_label: slotLabel,
+              room_id: room.room_id,
+              room_name: room.name,
+              room_capacity: room.capacity,
+              type: 'P',
+              basket_number: basketNum,
+              is_elective: true,
+              students_enrolled: enrolledCount,
+              duration: 90
+            });
+          }
+        }
+      }
     }
   }
 
